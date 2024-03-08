@@ -519,14 +519,17 @@ class DatasetBD(Dataset):
         label = int(label)
         # iamge:np [(N) H W C]
         image = np.array(data[0])
+        print(f'size of image: {image.size}')
         # image:torch [(N) C H W]
-        image = torch.tensor(image).unsqueeze(0).permute(0, 3, 1, 2)
+        image = torch.tensor(image, dtype=float).unsqueeze(0).permute(0, 3, 1, 2)
+        print(f'shape of image: {image.shape}')
         trigger = self.trigger_list[self.class_dict[label]]
         noise_grid = trigger[0]
         identity_grid = trigger[1]
         # s = 0.5 / size = 32 / recale = 1
         grid_temps = (identity_grid + 0.5 * noise_grid / 32) * 1
-        grid_temps = torch.clamp(grid_temps, -1, 1)
+        print(f'shape of grid_temps: {grid_temps.shape}')
+        grid_temps = torch.clamp(grid_temps, min=-1, max=1)
         # to device
         grid_temps = grid_temps.to(self.device)
         image = image.float()
