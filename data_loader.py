@@ -14,9 +14,11 @@ from PIL import Image
 
 from models.resnet import *
 
+cl = ['4ColoredBlockTrigger', 'fiveBlockTrigger', 'WaNetTrigger']
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 benign_model = torchattacks.resnet18()
-ckpt = Path('./demo/save_models/cifar_resnet_e8_a2_s10.pth')
+ckpt = Path('./save_models/cifar_resnet_e8_a2_s10.pth')
 ckpt = torch.load(ckpt)
 benign_model.load_state_dict(ckpt)
 benign_model.to(device)
@@ -75,6 +77,34 @@ def get_CL_test_loader(opt):
     
     return test_loader
 
+class SimpleDataset(Dataset):
+    '''
+    construct with PIL.Image
+    '''
+    def __init__(self, full_dataset=None, transform=None):
+        self.dataset = full_dataset
+        self.transform = transform
+        self.dataLen = len(self.dataset)
+    
+    def __getitem__(self, index):
+        image = self.dataset[index][0]
+        label = self.dataset[index][1]
+        # PIL.Image to np.array
+        image = np.array(image)
+        image = image / 255
+        # np.array to torch.tensor
+        image = torch.tensor(image, dtype=torch.float)
+        # np:image [H W C]
+        # tensor:image [C H W]
+        image = image.permute(2, 0, 1)
+
+        if self.transform:
+            image = self.transform(image)
+
+        return image, label
+    
+    def __len__(self):
+        return self.dataLen
 
 class DatasetCL(Dataset):
     '''
@@ -109,9 +139,11 @@ class DatasetBD(Dataset):
         self.device = device
         self.logger = logging.getLogger(__name__)
         self.class_dict = self.generateClassDict(full_dataset)
-        self.dataset = self.addUEBD(full_dataset, inject_portion=1.0, 
+        if opt.trigger_type in cl:
+            self.dataset = self.addAP(full_dataset)
+        self.dataset = self.addUEBD(self.dataset, inject_portion=1.0, 
                                     mode=mode, distance=distance, 
-                                    trig_w=0, trig_h=0, trigger_type=opt.trigger_type)
+                                    trig_w=0, trig_h=0, trigger_type=opt.trigger_type, opt=opt)
         self.transform = transform 
         
     def __getitem__(self, index):
@@ -142,13 +174,17 @@ class DatasetBD(Dataset):
     
     def addUEBD(self, dataset, inject_portion, 
                 mode, distance, 
-                trig_w, trig_h, trigger_type):
+                trig_w, trig_h, trigger_type, opt):
         '''
         Simple implementation of UEBD
             for train
             add trigger with different color for different classes             
         '''
-        self.trigger_list, self.color_list = self.triggerGenerator(trigger_type, trig_w, trig_h, len(self.class_dict))
+        if opt.defaultTrigger == True:
+            self.trigger_list = [(0, 6, 7, 8), (4, 5, 6, 8), (2, 5, 6, 7), (0, 5, 6, 7), (1, 2, 3, 6), (2, 4, 5, 8), (3, 4, 6, 7), (0, 1, 2, 3), (0, 4, 5, 8), (0, 4, 7, 8)]
+            self.color_list = [(1, 3, 0, 2), (0, 3, 1, 2), (1, 0, 2, 3), (0, 2, 1, 3), (2, 1, 0, 3), (2, 3, 0, 1), (3, 2, 0, 1), (2, 0, 1, 3), (2, 1, 3, 0), (3, 1, 2, 0)]
+        else:
+            self.trigger_list, self.color_list = self.triggerGenerator(trigger_type, trig_w, trig_h, len(self.class_dict))
         dataset_ = []
         # to get size of image
         image = dataset[0][0]
@@ -284,7 +320,6 @@ class DatasetBD(Dataset):
             
             self.logger.info("WaNet trigger full image")
             self.logger.info(f"trigger_list: {trigger_list}")
-        
         else:
             raise NotImplementedError
         
@@ -405,7 +440,8 @@ class DatasetBD(Dataset):
    
     def fourColoredBlockTrigger(self, data, width, height):
         label = data[1]
-        image = self.AdversarialPerturbation(data, width, height)
+        label = int(label)
+        image = np.array(data[0])
         trigger = self.trigger_list[self.class_dict[label]]
         colors = self.color_list[self.class_dict[label]]
         for i in range(len(trigger)):
@@ -446,6 +482,7 @@ class DatasetBD(Dataset):
         
     def fiveBlockTrigger(self, data, width, height):
         label = data[1]
+        label = int(label)
         # print(f"trigger: {self.trigger_list[self.class_dict[label]]}")
         image = np.array(data[0])
         trigger = self.trigger_list[self.class_dict[label]]
@@ -475,11 +512,11 @@ class DatasetBD(Dataset):
                 image[width-1][height-2] = color
             elif blockid == 8:
                 image[width-1][height-1] = color
-        print(f'shape of image: {image.shape}')
         return image 
     
     def WaNetTrigger(self, data, width, height):
         label = data[1]
+        label = int(label)
         # iamge:np [(N) H W C]
         image = np.array(data[0])
         # image:torch [(N) C H W]
@@ -503,20 +540,31 @@ class DatasetBD(Dataset):
         # print(f'size of image: {image.shape}')
         return image
     
-    def AdversarialPerturbation(self, data, width, height):
-        # input np image => output ad np image
-        # np:image [H W C]
-        # tensor:image [C H W]
-        label = data[1]
-        image = np.array(data[0])
-        # np image to tensor
-        iamge = image / 255
-        image = torch.tensor(image, dtype=torch.float).unsqueeze(0).permute(0, 3, 1, 2)
-        label = torch.tensor([label])
-        atk_image = atk(image, label)
-        image = atk_image.cpu().numpy()
-        image = image * 255
-        image = np.clip(image.astype('uint8'), 0, 255)
-        image = image.reshape(3, height, width)
-        image = image.transpose(1, 2, 0)
-        return image
+    def addAP(self, dataset):
+        # add AdversarialPerturbation to all images in datasets
+        # input full dataset of PIL.Image
+        # return full dataset of PIL.Image with AP
+        _dataset = []
+        batch_size = 128
+        # get c h w
+        c = 3
+        h = dataset[0][0].height
+        w = dataset[0][0].width
+        print(f'c: {c}, h: {h}, w: {w}')
+        DS = SimpleDataset(full_dataset=dataset, transform=None)
+        dataloader = DataLoader(DS, batch_size=batch_size, shuffle=False)
+        # add AP per batch
+        for images, labels in dataloader:
+            # images: torch.tensor [N C H W]
+            images.to(device)
+            atk_images = atk(images, labels)
+            images = atk_images.cpu()
+            images = images * 255
+            images = images.byte()
+            images = torch.clamp(images, 0, 255)
+            images = images.permute(0, 2, 3, 1)
+            images = np.array(images)
+            images.reshape(len(labels), h, w, c)
+            batch = zip(images, labels)
+            _dataset.extend(batch)
+        return _dataset

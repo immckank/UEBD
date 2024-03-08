@@ -12,6 +12,7 @@ from config import *
 from data_loader import *
 from models.wresnet import *
 from models.resnet import *
+from models.resnet_cifar import *
 from utils import progress_bar
 
 opt = get_args().parse_args()
@@ -23,12 +24,12 @@ logger = logging.getLogger(__name__)
 logger.info(opt)
 
 # model
-model = ResNet18()
+model = resnet18_cifar()
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.to(device)
 
-optimizer = optim.SGD(model.parameters(), lr=5e-4, momentum=0.9, weight_decay=1e-4, nesterov=True)
+optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4, nesterov=True)
 criterion = nn.CrossEntropyLoss().cuda()
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
 
@@ -70,7 +71,6 @@ def train(epoch):
             # progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
             #          % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
-
 def test(epoch):
     global best_acc
     logger = logging.getLogger(__name__)
@@ -108,7 +108,6 @@ def test(epoch):
             os.mkdir('checkpoint')
         torch.save(state, './checkpoint/ckpt.pth')
         best_acc = acc
-
 
 for epoch in range(0, opt.epochs):
     
