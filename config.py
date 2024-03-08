@@ -3,7 +3,7 @@ import argparse
 def get_args():
     parser = argparse.ArgumentParser(description='Demo')
     
-    parser.add_argument('--epochs', type=int, default=100, help='number of epochs to train (default: 200)')
+    parser.add_argument('--epochs', type=int, default=200, help='number of epochs to train (default: 200)')
     
     parser.add_argument('--lr', type=float, default=0.1, help='learning rate')
     
